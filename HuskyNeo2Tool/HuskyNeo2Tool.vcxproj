@@ -23,7 +23,7 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
     <CharacterSet>Unicode</CharacterSet>
-    <CLRSupport>Pure</CLRSupport>
+    <CLRSupport>true</CLRSupport>
     <WholeProgramOptimization>true</WholeProgramOptimization>
     <PlatformToolset>v110</PlatformToolset>
   </PropertyGroup>
@@ -127,9 +127,11 @@
     <ClCompile Include="AlarmStatusWindow.cpp" />
     <ClCompile Include="AllZonesTemperatureSetting.cpp" />
     <ClCompile Include="AssemblyInfo.cpp" />
+    <ClCompile Include="DBConfigureForm.cpp" />
     <ClCompile Include="Husky.cpp" />
     <ClCompile Include="HuskyNeo2Tool.cpp" />
     <ClCompile Include="IpConfigure.cpp" />
+    <ClCompile Include="M_WKQ.cpp" />
     <ClCompile Include="NumberKeyboard.cpp" />
     <ClCompile Include="SerialPort.cpp" />
     <ClCompile Include="SetAllZonesTemperatureForm.cpp" />
@@ -143,6 +145,10 @@
     <ClInclude Include="AlarmStatusWindow.h">
       <FileType>CppForm</FileType>
     </ClInclude>
+    <ClInclude Include="DBConfigureForm.h">
+      <FileType>CppForm</FileType>
+    </ClInclude>
+    <ClInclude Include="M_WKQ.h" />
     <ClInclude Include="NumberKeyboard.h">
       <FileType>CppForm</FileType>
     </ClInclude>
@@ -173,6 +179,9 @@
   <ItemGroup>
     <EmbeddedResource Include="AlarmStatusWindow.resx">
       <DependentUpon>AlarmStatusWindow.h</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="DBConfigureForm.resx">
+      <DependentUpon>DBConfigureForm.h</DependentUpon>
     </EmbeddedResource>
     <EmbeddedResource Include="NumberKeyboard.resx">
       <DependentUpon>NumberKeyboard.h</DependentUpon>

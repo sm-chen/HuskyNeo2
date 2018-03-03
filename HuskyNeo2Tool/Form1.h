@@ -1,14 +1,21 @@
 #pragma once
 
+#include <tchar.h>
 #include <stdio.h>
+//#include <windows.h>
 #include <WinSock2.h>
-#pragma comment(lib, "ws2_32.lib")  //加载 ws2_32.dll
+
 #include "Husky.h"
+#include "M_WKQ.h"
 #include "IpConfigure.h"
 #include "SetOneZoneTemperatureForm.h"
 #include "SetAllZonesTemperatureForm.h"
 #include "AlarmStatusWindow.h"
 #include "SetTempInProgressForm.h"
+#include "DBConfigureForm.h"
+
+#import "c:\Program Files\Common Files\System\ado\msado15.dll" no_namespace rename("EOF","EndOfFile")
+#pragma comment(lib, "ws2_32.lib")  //加载 ws2_32.dll
 
 #define HUSKY_DEV_NUM 12
 
@@ -127,10 +134,28 @@ namespace HuskyNeo2Tool {
 
 			//currentHusky = huskys[0];
 			currentHusky = new Husky();
+
 			//alarmStatusWindow = gcnew AlarmStatusWindow();
 
 			setAllZonesTemperatureForm = gcnew SetAllZonesTemperatureForm();
 			setTempInProgressForm = gcnew SetTempInProgressForm();
+
+			// Database /////////////////////////////////////
+			DBUpdateEnable = TRUE; //FALSE; default TRUE
+			DBDebugMsgEnable = FALSE;
+			DBUpdateFrequency = 15000; // default 15S
+			hostIP = "local"; //"10.197.224.205";  local
+			userName = "sa";
+			userPassword = "123456";
+			DBName = "M_WKQ";
+			tableTemperature = "WKQ_Table";
+			tableAlarm = "WKQ_ALARM_Table";
+			m_wkq = new M_WKQ();
+			// fix me
+			m_wkq->DBDATAID = 1;
+			m_wkq->EQUIPMENTID = 1;
+			m_wkq->STATUS = 1;
+			// Database /////////////////////////////////////
 
 			realtimeTemperatureUiUpdate = gcnew UiUpdate(this, &HuskyNeo2Tool::Form1::realtimeTemperatureUiUpdateMethod);
 			setpointUiUpdate = gcnew UiUpdate(this, &HuskyNeo2Tool::Form1::setpointUiUpdateMethod);
@@ -138,6 +163,7 @@ namespace HuskyNeo2Tool {
 			myShowAlarmMsg = gcnew showAlarmMsg(this, &HuskyNeo2Tool::Form1::showAlarmMsgMethod);
 			setTempProgressUiUpdate = gcnew UiUpdate(this, &HuskyNeo2Tool::Form1::setTempProgressUiUpdateMethod);
 			showCommunicationErrUiUpdate = gcnew UiUpdate(this, &HuskyNeo2Tool::Form1::showCommunicationErrUiUpdateMethod);
+			alarmMsgUiUpdate = gcnew UiUpdate(this, &HuskyNeo2Tool::Form1::alarmMsgUiUpdateMethod);
 			opLock = FALSE;
 
 			t2 = gcnew Thread(gcnew ThreadStart(this, &HuskyNeo2Tool::Form1::alarmStatusCheckingThread));
@@ -155,6 +181,10 @@ namespace HuskyNeo2Tool {
 			communicationErrDetectThreadHandle = gcnew Thread(gcnew ThreadStart(this, &HuskyNeo2Tool::Form1::communicationErrDetectThread));
 			communicationErrDetectThreadHandle->IsBackground = true;
 			communicationErrDetectThreadHandle->Start();
+			
+			db = gcnew Thread(gcnew ThreadStart(this, &HuskyNeo2Tool::Form1::DatabaseUpdateThread));
+			db->IsBackground = true;
+			db->Start();
 		}
 
 	protected:
@@ -167,10 +197,12 @@ namespace HuskyNeo2Tool {
 				currentHusky->disconnect();
 			if (t2 && t2->IsAlive)
 				t2->Abort();
-			if (t1 &&t1->IsAlive)
+			if (t1 && t1->IsAlive)
 				t1->Abort();
 			if (readTemperatureButtonThread && readTemperatureButtonThread->IsAlive)
 				readTemperatureButtonThread->Abort();
+			if (db && db->IsAlive)
+				db->Abort();
 
 			if (components)
 				delete components;
@@ -207,21 +239,8 @@ namespace HuskyNeo2Tool {
 		UiUpdate^ setpointUiUpdate;
 		UiUpdate^ zoneSwitchUiUpdate;
 		UiUpdate^ setTempProgressUiUpdate;
-private: System::Windows::Forms::Button^  buttonLock;
-
-
-
-
-
-
-
-
-
-
-
-
-
-		 UiUpdate^ showCommunicationErrUiUpdate;
+		UiUpdate^ alarmMsgUiUpdate;
+		UiUpdate^ showCommunicationErrUiUpdate;
 	
 		void realtimeTemperatureUiUpdateMethod(int i, float value)
 		{
@@ -251,7 +270,28 @@ private: System::Windows::Forms::Button^  buttonLock;
 		void showCommunicationErrUiUpdateMethod(int i, float value)
 		{
 			MessageBox::Show("通讯故障！", "Error", MessageBoxButtons::OK, MessageBoxIcon::Exclamation);
-			//currentHusky->restoreCommunicationErr();
+		}
+		void alarmMsgUiUpdateMethod(int i, float value)
+		{
+			if (!DBDebugMsgEnable)
+				return;
+
+			switch (i) {
+			case 0:
+				MessageBox::Show("数据库通讯故障！ WKQ_Table表连接失败！", "Error", MessageBoxButtons::OK, MessageBoxIcon::Exclamation);
+				break;
+			case 1:
+				MessageBox::Show("数据库通讯故障！ WKQ_Table表数据更新失败！", "Error", MessageBoxButtons::OK, MessageBoxIcon::Exclamation);
+				break;
+			case 2:
+				MessageBox::Show("数据库通讯故障！ WKQ_ALARM_Table表连接失败！", "Error", MessageBoxButtons::OK, MessageBoxIcon::Exclamation);
+				break;
+			case 3:
+				MessageBox::Show("数据库通讯故障！ WKQ_ALARM_Table表数据更新失败！", "Error", MessageBoxButtons::OK, MessageBoxIcon::Exclamation);
+				break;
+			default:
+				MessageBox::Show("数据库通讯故障！", "Error", MessageBoxButtons::OK, MessageBoxIcon::Exclamation);
+			}
 		}
 
 		void UiUpdateThread()
@@ -276,6 +316,7 @@ private: System::Windows::Forms::Button^  buttonLock;
 						//temperature = (float)tmp / 10;
 						int tmp = (int)(temperature + 0.5);
 						this->Invoke(this->setpointUiUpdate, i, tmp);
+						m_wkq->ZONES_SET_TEMP[i] = tmp; // value to update database
 						Sleep(50);
 					}
 
@@ -300,15 +341,17 @@ private: System::Windows::Forms::Button^  buttonLock;
 					float realtimeTemperature = currentHusky->getRealtimeTemperature(i + 1);
 					if (realtimeTemperature == 0) {
 						this->Invoke(this->realtimeTemperatureUiUpdate, i, (float)0);
+						m_wkq->ZONES_NOW_TEMP[i] = 0;
 					} else {
 						realtimeTemperature = (realtimeTemperature - 32) / (float)1.8;
 						//int tmp = realtimeTemperature * 10 + 0.5;
 						//realtimeTemperature = (float)tmp / 10;
 						int tmp = (int)(realtimeTemperature + 0.5);
 						this->Invoke(this->realtimeTemperatureUiUpdate, i, tmp);
+						m_wkq->ZONES_NOW_TEMP[i] = tmp; // value to update database
 					}
 					Sleep(50);
-				} 
+				}
 				Sleep(2000);
 			} while (1);
 		}
@@ -387,10 +430,11 @@ private: System::Windows::Forms::Button^  buttonLock;
 			/* // test
 			while (1) {
 				Sleep(3000);
-				alarmStatusWindow->labelZoneAlarmMsgArray[1]->ForeColor = System::Drawing::Color::Black;
-				this->Invoke(this->myShowAlarmMsg);
+				//alarmStatusWindow->labelZoneAlarmMsgArray[1]->ForeColor = System::Drawing::Color::Black;
+				//this->Invoke(this->myShowAlarmMsg);
+				DatabaseAlarmUpdate();
 			}
-			*/
+			//*/
 			while (1) {
 				if (currentHusky == NULL || !currentHusky->isConnected()) {
 					Sleep(1000);
@@ -401,64 +445,261 @@ private: System::Windows::Forms::Button^  buttonLock;
 						break;
 					}
 					uint16_t status = currentHusky->getControlerStatus(i + 1);
+					
 					if (status && status != MANUAL_REGULATION) {
 						if (currentHusky == NULL || !currentHusky->isConnected())
 							break;
-
-						uint16_t status1 = currentHusky->getControlerStatus(1);
-						uint16_t status2 = currentHusky->getControlerStatus(2);
-						uint16_t status3 = currentHusky->getControlerStatus(3);
-						uint16_t status4 = currentHusky->getControlerStatus(4);
-						uint16_t status5 = currentHusky->getControlerStatus(5);
-						uint16_t status6 = currentHusky->getControlerStatus(6);
-						uint16_t status7 = currentHusky->getControlerStatus(7);
-						uint16_t status8 = currentHusky->getControlerStatus(8);
-						uint16_t status9 = currentHusky->getControlerStatus(9);
-						uint16_t status10 = currentHusky->getControlerStatus(10);
-						uint16_t status11 = currentHusky->getControlerStatus(11);
-						uint16_t status12 = currentHusky->getControlerStatus(12);
-
-						char *msg1 = currentHusky->getControlerStatusString(status1);
-						char *msg2 = currentHusky->getControlerStatusString(status2);
-						char *msg3 = currentHusky->getControlerStatusString(status3);
-						char *msg4 = currentHusky->getControlerStatusString(status4);
-						char *msg5 = currentHusky->getControlerStatusString(status5);
-						char *msg6 = currentHusky->getControlerStatusString(status6);
-						char *msg7 = currentHusky->getControlerStatusString(status7);
-						char *msg8 = currentHusky->getControlerStatusString(status8);
-						char *msg9 = currentHusky->getControlerStatusString(status9);
-						char *msg10 = currentHusky->getControlerStatusString(status10);
-						char *msg11 = currentHusky->getControlerStatusString(status11);
-						char *msg12 = currentHusky->getControlerStatusString(status12);
+						/*************************/
+						m_wkq->ALARM_CODE = status;
+						m_wkq->ALARM = currentHusky->getControlerStatusString(status);
+						DatabaseAlarmUpdate();
+						/*************************/
+						uint16_t status[12];
+						for (int j = 0; j < 12; j++) {
+							status[j] = currentHusky->getControlerStatus(j + 1);
+						}
 
 						alarmStatusWindow = gcnew AlarmStatusWindow();
+						char *msgs[12];
 
-						alarmStatusWindow->labelZoneAlarmMsgArray[0]->Text = gcnew String(msg1);
-						alarmStatusWindow->labelZoneAlarmMsgArray[1]->Text = gcnew String(msg2);
-						alarmStatusWindow->labelZoneAlarmMsgArray[2]->Text = gcnew String(msg3);
-						alarmStatusWindow->labelZoneAlarmMsgArray[3]->Text = gcnew String(msg4);
-						alarmStatusWindow->labelZoneAlarmMsgArray[4]->Text = gcnew String(msg5);
-						alarmStatusWindow->labelZoneAlarmMsgArray[5]->Text = gcnew String(msg6);
-						alarmStatusWindow->labelZoneAlarmMsgArray[6]->Text = gcnew String(msg7);
-						alarmStatusWindow->labelZoneAlarmMsgArray[7]->Text = gcnew String(msg8);
-						alarmStatusWindow->labelZoneAlarmMsgArray[8]->Text = gcnew String(msg9);
-						alarmStatusWindow->labelZoneAlarmMsgArray[9]->Text = gcnew String(msg10);
-						alarmStatusWindow->labelZoneAlarmMsgArray[10]->Text = gcnew String(msg11);
-						alarmStatusWindow->labelZoneAlarmMsgArray[11]->Text = gcnew String(msg12);
+						for (int j = 0; j < 12; j++) {
+							msgs[j] = currentHusky->getControlerStatusString(status[j]);
+							alarmStatusWindow->labelZoneAlarmMsgArray[j]->Text = gcnew String(msgs[j]);
+						}
 
 						this->Invoke(this->myShowAlarmMsg);
+						
 						Sleep(2000);
 						break;
 					}
-					Sleep(1000);
+					Sleep(500);
 				}
 				Sleep(1000);
 			}
 		}
+
+	private: // data base
+		Thread ^db;
+		BOOLEAN mDatabaseConnected;
+		M_WKQ *m_wkq;
+		BOOLEAN DBUpdateEnable;
+		BOOLEAN DBDebugMsgEnable;
+		int DBUpdateFrequency;
+
+		String ^hostIP;
+		String ^userName;
+		String ^userPassword;
+		String ^DBName;
+		String ^tableTemperature;
+		String ^tableAlarm;
+
+		void DatabaseUpdateThread()
+		{
+			Sleep(10000); // delay 10s to start
+			while (1) {
+				if (currentHusky == NULL || !currentHusky->isConnected() || !DBUpdateEnable) {
+					Sleep(6000);
+					continue;
+				}
+				mDatabaseConnected = FALSE;
+				::CoInitialize(NULL);//初始化OLE/COM库环境，为访问ADO接口做准备
+				_RecordsetPtr m_pRecordset("ADODB.Recordset");
+				_ConnectionPtr m_pConnection("ADODB.Connection");
+				char sqlStr[100];
+				sprintf_s(sqlStr, "select * from %s", tableTemperature);
+				_bstr_t bstrSQL(sqlStr);   //SQL 查询语句
+				try {
+					m_pConnection.CreateInstance("ADODB.Connection");//创建Connection对象
+					//设置连接字符串 必须是BSTR or _bstr_ 类型 uid  和 pwd  账户和密码可以自己设置
+					//如果数据库在网上，则Server形如（192.168.1.5） 10.197.224.205
+					//server=(local):数据库服务器的地址，如果server的值为(local)，表示是当前电脑； 
+					//UID=sa：数据库的用户名是sa；pwd=sa:数据库的密码是123456;
+					//database=M_WKQ:数据库的库名是M_WKQ；
+					//Provider=SQLOLEDB 数据库采用SQL的方式连接
+					char connectStringBuff[100];
+					sprintf_s(connectStringBuff, "Provider=SQLOLEDB;Server=(%s);Database=%s;uid=%s;pwd=%s;", hostIP, DBName, userName, userPassword);
+					_bstr_t strConnect = connectStringBuff; //"Provider=SQLOLEDB;Server=(local);Database=M_WKQ;uid=sa;pwd=123456;";
+
+					m_pConnection->Open(strConnect, "", "", adModeUnknown);
+					if (m_pConnection == NULL) {
+						//cerr << "Lind data ERROR!\n";
+					}
+					//创建记录集
+					m_pRecordset.CreateInstance(_uuidof(Recordset));
+					//取得表中的记录
+					m_pRecordset->Open(bstrSQL, m_pConnection.GetInterfacePtr(), adOpenDynamic, adLockOptimistic, adCmdText);
+					mDatabaseConnected = TRUE;
+					while (mDatabaseConnected && currentHusky->isConnected() && DBUpdateEnable) {
+						try {
+							m_pRecordset->raw_MoveLast();
+							//m_pRecordset->MoveFirst();
+							m_pRecordset->AddNew(); ///添加新记录
+
+							m_pRecordset->PutCollect("DBDATAID", _variant_t(m_wkq->DBDATAID));
+							m_pRecordset->PutCollect("EQUIPMENTID", _variant_t(m_wkq->EQUIPMENTID));
+							m_pRecordset->PutCollect("EQUIPMENTNAME", _variant_t(m_wkq->EQUIPMENTNAME));
+							m_pRecordset->PutCollect("EQUIPMENTIP", _variant_t(getLocalIp()));
+							m_pRecordset->PutCollect("STATUS", _variant_t(m_wkq->STATUS));
+							m_pRecordset->PutCollect("ZONE01_NOW_TEMP", _variant_t(m_wkq->ZONES_NOW_TEMP[0]));
+							m_pRecordset->PutCollect("ZONE01_SET_TEMP", _variant_t(m_wkq->ZONES_SET_TEMP[0]));
+							m_pRecordset->PutCollect("ZONE02_NOW_TEMP", _variant_t(m_wkq->ZONES_NOW_TEMP[1]));
+							m_pRecordset->PutCollect("ZONE02_SET_TEMP", _variant_t(m_wkq->ZONES_SET_TEMP[1]));
+							m_pRecordset->PutCollect("ZONE03_NOW_TEMP", _variant_t(m_wkq->ZONES_NOW_TEMP[2]));
+							m_pRecordset->PutCollect("ZONE03_SET_TEMP", _variant_t(m_wkq->ZONES_SET_TEMP[2]));
+							m_pRecordset->PutCollect("ZONE04_NOW_TEMP", _variant_t(m_wkq->ZONES_NOW_TEMP[3]));
+							m_pRecordset->PutCollect("ZONE04_SET_TEMP", _variant_t(m_wkq->ZONES_SET_TEMP[3]));
+							m_pRecordset->PutCollect("ZONE05_NOW_TEMP", _variant_t(m_wkq->ZONES_NOW_TEMP[4]));
+							m_pRecordset->PutCollect("ZONE05_SET_TEMP", _variant_t(m_wkq->ZONES_SET_TEMP[4]));
+							m_pRecordset->PutCollect("ZONE06_NOW_TEMP", _variant_t(m_wkq->ZONES_NOW_TEMP[5]));
+							m_pRecordset->PutCollect("ZONE06_SET_TEMP", _variant_t(m_wkq->ZONES_SET_TEMP[5]));
+							m_pRecordset->PutCollect("ZONE07_NOW_TEMP", _variant_t(m_wkq->ZONES_NOW_TEMP[6]));
+							m_pRecordset->PutCollect("ZONE07_SET_TEMP", _variant_t(m_wkq->ZONES_SET_TEMP[6]));
+							m_pRecordset->PutCollect("ZONE08_NOW_TEMP", _variant_t(m_wkq->ZONES_NOW_TEMP[7]));
+							m_pRecordset->PutCollect("ZONE08_SET_TEMP", _variant_t(m_wkq->ZONES_SET_TEMP[7]));
+							m_pRecordset->PutCollect("ZONE09_NOW_TEMP", _variant_t(m_wkq->ZONES_NOW_TEMP[8]));
+							m_pRecordset->PutCollect("ZONE09_SET_TEMP", _variant_t(m_wkq->ZONES_SET_TEMP[8]));
+							m_pRecordset->PutCollect("ZONE10_NOW_TEMP", _variant_t(m_wkq->ZONES_NOW_TEMP[9]));
+							m_pRecordset->PutCollect("ZONE10_SET_TEMP", _variant_t(m_wkq->ZONES_SET_TEMP[9]));
+							m_pRecordset->PutCollect("ZONE11_NOW_TEMP", _variant_t(m_wkq->ZONES_NOW_TEMP[10]));
+							m_pRecordset->PutCollect("ZONE11_SET_TEMP", _variant_t(m_wkq->ZONES_SET_TEMP[10]));
+							m_pRecordset->PutCollect("ZONE12_NOW_TEMP", _variant_t(m_wkq->ZONES_NOW_TEMP[11]));
+							m_pRecordset->PutCollect("ZONE12_SET_TEMP", _variant_t(m_wkq->ZONES_SET_TEMP[11]));
+
+							System::DateTime d1 = System::DateTime::Now;
+							System::String ^str = d1.ToString("yyyy-MM-dd HH:mm:ss");
+							//System::String ^str = d1.ToString("yyyy-MM-dd");
+							_variant_t my_variant;
+							char* str2 = (char*)(void*)System::Runtime::InteropServices::Marshal::StringToHGlobalAnsi(str);
+							printf(str2);
+							//System::Runtime::InteropServices::Marshal::FreeHGlobal(str2);
+							my_variant.SetString(str2);
+							m_pRecordset->PutCollect("MODIFYDATE", &my_variant);
+
+							m_pRecordset->Update();
+
+							Sleep(DBUpdateFrequency);
+						} catch (_com_error c) {
+							this->Invoke(this->alarmMsgUiUpdate, 1, 0);
+							mDatabaseConnected = FALSE;
+						}
+					}
+					m_pRecordset->Close(); // 关闭记录集
+				} catch(_com_error c) {
+					this->Invoke(this->alarmMsgUiUpdate, 0, 0);
+					mDatabaseConnected = FALSE;
+				}
+
+				 if(m_pConnection->State)
+					  m_pConnection->Close();
+
+				 ::CoUninitialize();
+			} //end while(1)
+		}
+
+		char* getLocalIp()
+		{
+			struct in_addr addr;
+			char host_name[255];
+			//获取本地主机名称
+			if (gethostname(host_name, sizeof(host_name)) == SOCKET_ERROR) {
+				printf("Error %d when getting local host name.n", WSAGetLastError());
+				goto Err;
+			}
+			printf("Host name is: %s\n", host_name);
+
+			//从主机名数据库中得到对应的“主机”
+			struct hostent *phe = gethostbyname(host_name);
+			if (phe == NULL) {
+				printf("Yow! Bad host lookup.");
+				goto Err;
+			}
+
+			// fix me:fix multi ip address case!
+			if (phe->h_addr_list[0] != NULL) {
+				memcpy(&addr, phe->h_addr_list[0], sizeof(struct in_addr));
+			}
+		Err:
+			return inet_ntoa(addr);
+		}
+
+		// alarm msg update
+		void DatabaseAlarmUpdate()
+		{
+			if (!DBUpdateEnable) {
+				return;
+			}
+			mDatabaseConnected = FALSE;
+			::CoInitialize(NULL);//初始化OLE/COM库环境，为访问ADO接口做准备
+			_RecordsetPtr m_pRecordset("ADODB.Recordset");
+			_ConnectionPtr m_pConnection("ADODB.Connection");
+			char sqlStr[100];
+			sprintf_s(sqlStr, "select * from %s", tableAlarm);
+			_bstr_t bstrSQL(sqlStr);   //SQL 查询语句
+			try {
+				m_pConnection.CreateInstance("ADODB.Connection");//创建Connection对象
+				//设置连接字符串 必须是BSTR or _bstr_ 类型 uid  和 pwd  账户和密码可以自己设置
+				//如果数据库在网上，则Server形如（192.168.1.5）
+				//server=(local):数据库服务器的地址，如果server的值为(local)，表示是当前电脑； 
+				//UID=sa：数据库的用户名是sa；pwd=sa:数据库的密码是123456;
+				//database=M_WKQ:数据库的库名是M_WKQ；
+				//Provider=SQLOLEDB 数据库采用SQL的方式连接
+				char connectStringBuff[100];
+				sprintf_s(connectStringBuff, "Provider=SQLOLEDB;Server=(%s);Database=%s;uid=%s;pwd=%s;", hostIP, DBName, userName, userPassword);
+				_bstr_t strConnect = connectStringBuff; //"Provider=SQLOLEDB;Server=(local);Database=M_WKQ;uid=sa;pwd=123456;";
+
+				m_pConnection->Open(strConnect, "", "", adModeUnknown);
+				if (m_pConnection == NULL) {
+					//cerr << "Lind data ERROR!\n";
+				}
+				//创建记录集
+				m_pRecordset.CreateInstance(_uuidof(Recordset));
+				//取得表中的记录
+				m_pRecordset->Open(bstrSQL, m_pConnection.GetInterfacePtr(), adOpenDynamic, adLockOptimistic, adCmdText);
+				mDatabaseConnected = TRUE;
+
+				try {
+					m_pRecordset->raw_MoveLast();
+					m_pRecordset->AddNew();
+
+					m_pRecordset->PutCollect("DBDATAID", _variant_t(m_wkq->DBDATAID));
+					m_pRecordset->PutCollect("EQUIPMENTID", _variant_t(m_wkq->EQUIPMENTID));
+					m_pRecordset->PutCollect("EQUIPMENTNAME", _variant_t(m_wkq->EQUIPMENTNAME));
+					m_pRecordset->PutCollect("EQUIPMENTIP", _variant_t(getLocalIp()));
+
+					m_pRecordset->PutCollect("ALARM_CODE", _variant_t(m_wkq->ALARM_CODE));
+					m_pRecordset->PutCollect("ALARM", _variant_t(m_wkq->ALARM));
+
+					System::DateTime d1 = System::DateTime::Now;
+					System::String ^str = d1.ToString("yyyy-MM-dd HH:mm:ss");
+					//System::String ^str = d1.ToString("yyyy-MM-dd");
+					_variant_t my_variant;
+					char* str2 = (char*)(void*)System::Runtime::InteropServices::Marshal::StringToHGlobalAnsi(str);
+					printf(str2);
+					//System::Runtime::InteropServices::Marshal::FreeHGlobal(str2);
+					my_variant.SetString(str2);
+					m_pRecordset->PutCollect("ALARM_BEGINTIME", &my_variant);
+					m_pRecordset->PutCollect("MODIFYDATE", &my_variant);
+
+					m_pRecordset->Update();
+				} catch (_com_error c) {
+					this->Invoke(this->alarmMsgUiUpdate, 3, 0);
+					mDatabaseConnected = FALSE;
+				}
+
+				m_pRecordset->Close(); // 关闭记录集
+			} catch(_com_error c) {
+				this->Invoke(this->alarmMsgUiUpdate, 2, 0);
+				mDatabaseConnected = FALSE;
+			}
+
+			if(m_pConnection->State)
+				m_pConnection->Close();
+
+			::CoUninitialize();
+		}
+
 private: System::Windows::Forms::Label^  labelComNumPrompt;
-
-
-
+private: System::Windows::Forms::Button^  buttonLock;
 	private: System::Windows::Forms::Label^  labelZone12Setpoint;
 	private: System::Windows::Forms::Label^  labelZone08Setpoint;
 	private: System::Windows::Forms::Label^  labelZone04Setpoint;
@@ -478,7 +719,6 @@ private: System::Windows::Forms::Label^  labelComNumPrompt;
 	private: System::Windows::Forms::GroupBox^  groupBoxZone01;
 private: System::Windows::Forms::Label^  labelRealTempPrompt01;
 private: System::Windows::Forms::Label^  labelSetpointPrompt01;
-
 
 	private: System::Windows::Forms::Button^  buttonZone01Switch;
 	private: System::Windows::Forms::Label^  labelZone01RealTemp;
@@ -597,7 +837,6 @@ private: System::Windows::Forms::Label^  labelRealTempPrompt06;
 	private: System::Windows::Forms::GroupBox^  groupBoxZone05;
 private: System::Windows::Forms::Label^  labelSetpointUnits05;
 
-
 private: System::Windows::Forms::Label^  labelRealTempUnits05;
 
 	private: System::Windows::Forms::Label^  labelZone05RealTemp;
@@ -605,18 +844,14 @@ private: System::Windows::Forms::Label^  labelRealTempUnits05;
 private: System::Windows::Forms::Label^  labelSetpointPrompt05;
 private: System::Windows::Forms::Label^  labelRealTempPrompt05;
 
-
-
 	private: System::Windows::Forms::GroupBox^  groupBoxZone02;
 private: System::Windows::Forms::Label^  labelSetpointUnits02;
-
 
 private: System::Windows::Forms::Label^  labelRealTempUnits02;
 
 	private: System::Windows::Forms::Label^  labelZone02RealTemp;
 	private: System::Windows::Forms::Button^  buttonZone02Switch;
 private: System::Windows::Forms::Label^  labelSetpointPrompt02;
-
 
 private: System::Windows::Forms::Label^  labelRealTempPrompt02;
 
@@ -792,6 +1027,7 @@ private: System::Windows::Forms::Label^  labelRealTempPrompt02;
 			this->labelComNumPrompt->Size = System::Drawing::Size(131, 22);
 			this->labelComNumPrompt->TabIndex = 13;
 			this->labelComNumPrompt->Text = L"机台端口号:";
+			this->labelComNumPrompt->DoubleClick += gcnew System::EventHandler(this, &Form1::labelComNumPrompt_DoubleClick);
 			// 
 			// button28
 			// 
@@ -2715,6 +2951,48 @@ private: System::Void labelSetpointUnits11_Click(System::Object^  sender, System
 		 }
 private: System::Void labelSetpointUnits12_Click(System::Object^  sender, System::EventArgs^  e) {
 			 zoneSetpoint_Click(12);
+		 }
+/******************************* Database Configure ***********************************/
+private: System::Void labelComNumPrompt_DoubleClick(System::Object^  sender, System::EventArgs^  e) {
+			DBConfigureForm ^dBConfigureForm = gcnew DBConfigureForm();
+
+			dBConfigureForm->textBoxHostIP->Text = hostIP;
+			dBConfigureForm->textBoxUserName->Text = userName;
+			dBConfigureForm->textBoxPassword->Text = userPassword;
+			dBConfigureForm->textBoxDBName->Text = DBName;
+			dBConfigureForm->textBoxtTemperatureTableName->Text = tableTemperature;
+			dBConfigureForm->textBoxAlarmTableName->Text = tableAlarm;
+
+			if (DBUpdateEnable)
+				dBConfigureForm->checkBoxDBUpdateEnable->Checked = true;
+			else
+				dBConfigureForm->checkBoxDBUpdateEnable->Checked = false;
+
+			if (DBDebugMsgEnable)
+				dBConfigureForm->checkBoxDBDebugMsgEnable->Checked = true;
+			else
+				dBConfigureForm->checkBoxDBDebugMsgEnable->Checked = false;
+
+			dBConfigureForm->textBoxDBUpdateFrequency->Text = (DBUpdateFrequency / 1000).ToString();
+
+			System::Windows::Forms::DialogResult result = dBConfigureForm->ShowDialog();
+			if (result == ::DialogResult::OK) {
+				hostIP = dBConfigureForm->textBoxHostIP->Text;
+				userName = dBConfigureForm->textBoxUserName->Text;
+				userPassword = dBConfigureForm->textBoxPassword->Text;
+				DBName = dBConfigureForm->textBoxDBName->Text;
+				tableTemperature = dBConfigureForm->textBoxtTemperatureTableName->Text;
+				tableAlarm = dBConfigureForm->textBoxAlarmTableName->Text;
+				if (dBConfigureForm->checkBoxDBUpdateEnable->Checked)
+					DBUpdateEnable = TRUE;
+				else
+					DBUpdateEnable = FALSE;
+				if (dBConfigureForm->checkBoxDBDebugMsgEnable->Checked)
+					DBDebugMsgEnable = TRUE;
+				else
+					DBDebugMsgEnable = FALSE;
+				DBUpdateFrequency = Convert::ToDouble(dBConfigureForm->textBoxDBUpdateFrequency->Text) * 1000;
+			}
 		 }
 };
 }

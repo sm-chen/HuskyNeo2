@@ -733,7 +733,7 @@ error:
 BOOLEAN Husky::getZoneOnOff(int zone)
 {
 	uint16_t mode;
-	float manualPercentOutput;
+	//float manualPercentOutput;
 
 	mode = getRegulationMode(zone);
 	//manualPercentOutput = getManualPercentOutput(zone);

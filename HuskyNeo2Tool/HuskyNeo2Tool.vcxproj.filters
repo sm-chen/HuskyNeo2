@@ -48,6 +48,12 @@
     <ClCompile Include="NumberKeyboard.cpp">
       <Filter>头文件</Filter>
     </ClCompile>
+    <ClCompile Include="M_WKQ.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="DBConfigureForm.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Form1.h">
@@ -83,6 +89,12 @@
     <ClInclude Include="NumberKeyboard.h">
       <Filter>头文件</Filter>
     </ClInclude>
+    <ClInclude Include="M_WKQ.h">
+      <Filter>源文件</Filter>
+    </ClInclude>
+    <ClInclude Include="DBConfigureForm.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <None Include="app.ico">
@@ -104,6 +116,9 @@
       <Filter>资源文件</Filter>
     </EmbeddedResource>
     <EmbeddedResource Include="SetOneZoneTemperatureForm.resx">
+      <Filter>资源文件</Filter>
+    </EmbeddedResource>
+    <EmbeddedResource Include="NumberKeyboard.resx">
       <Filter>资源文件</Filter>
     </EmbeddedResource>
   </ItemGroup>

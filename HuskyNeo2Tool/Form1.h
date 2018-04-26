@@ -144,7 +144,7 @@ namespace HuskyNeo2Tool {
 			DBUpdateEnable = TRUE; //FALSE; default TRUE
 			DBDebugMsgEnable = FALSE;
 			DBUpdateFrequency = 15000; // default 15S
-			hostIP = "local"; //"10.197.224.205";  local
+			hostIP = "10.197.224.205"; //ip or (local)
 			userName = "sa";
 			userPassword = "123456";
 			DBName = "M_WKQ";
@@ -154,7 +154,7 @@ namespace HuskyNeo2Tool {
 			// fix me
 			m_wkq->DBDATAID = 1;
 			m_wkq->EQUIPMENTID = 1;
-			m_wkq->STATUS = 1;
+			m_wkq->STATUS = 1; // 1:device running normal. 0:device disconnected,status unknow. 2:device alarming.
 			// Database /////////////////////////////////////
 
 			realtimeTemperatureUiUpdate = gcnew UiUpdate(this, &HuskyNeo2Tool::Form1::realtimeTemperatureUiUpdateMethod);
@@ -407,8 +407,13 @@ namespace HuskyNeo2Tool {
 			Sleep(5000);
 			while (1) {
 				if (currentHusky != NULL && currentHusky->isConnected() && currentHusky->isCommunicationErr()) {
+					// updata status
+					m_wkq->STATUS = 0;
 					this->Invoke(this->showCommunicationErrUiUpdate, 0, 0);
 					currentHusky->restoreCommunicationErr();
+				} else {
+					// updata status
+					//m_wkq->STATUS = 1;
 				}
 				Sleep(1000);
 			}
@@ -423,6 +428,7 @@ namespace HuskyNeo2Tool {
 			if (result == ::DialogResult::OK) {
 				currentHusky->controlerReset();
 			}
+			m_wkq->STATUS = 1; // restore status to db
 		}
 
 		void alarmStatusCheckingThread()
@@ -451,6 +457,7 @@ namespace HuskyNeo2Tool {
 							break;
 						/*************************/
 						m_wkq->ALARM_CODE = status;
+						m_wkq->STATUS = 2;
 						m_wkq->ALARM = currentHusky->getControlerStatusString(status);
 						DatabaseAlarmUpdate();
 						/*************************/
@@ -511,13 +518,20 @@ namespace HuskyNeo2Tool {
 				try {
 					m_pConnection.CreateInstance("ADODB.Connection");//创建Connection对象
 					//设置连接字符串 必须是BSTR or _bstr_ 类型 uid  和 pwd  账户和密码可以自己设置
-					//如果数据库在网上，则Server形如（192.168.1.5） 10.197.224.205
 					//server=(local):数据库服务器的地址，如果server的值为(local)，表示是当前电脑； 
+					//如果数据库在网上，则Server形如 10.197.224.205 //不能带括号！！！
 					//UID=sa：数据库的用户名是sa；pwd=sa:数据库的密码是123456;
 					//database=M_WKQ:数据库的库名是M_WKQ；
 					//Provider=SQLOLEDB 数据库采用SQL的方式连接
 					char connectStringBuff[100];
-					sprintf_s(connectStringBuff, "Provider=SQLOLEDB;Server=(%s);Database=%s;uid=%s;pwd=%s;", hostIP, DBName, userName, userPassword);
+					String ^host;
+					if (hostIP->Equals("local")) {
+						host = "(local)";
+					} else {
+						host = hostIP + ",6895";
+					}
+					hostIP = host;
+					sprintf_s(connectStringBuff, "Provider=SQLOLEDB;Server=%s;Database=%s;uid=%s;pwd=%s;", host, DBName, userName, userPassword);
 					_bstr_t strConnect = connectStringBuff; //"Provider=SQLOLEDB;Server=(local);Database=M_WKQ;uid=sa;pwd=123456;";
 
 					m_pConnection->Open(strConnect, "", "", adModeUnknown);
@@ -644,7 +658,14 @@ namespace HuskyNeo2Tool {
 				//database=M_WKQ:数据库的库名是M_WKQ；
 				//Provider=SQLOLEDB 数据库采用SQL的方式连接
 				char connectStringBuff[100];
-				sprintf_s(connectStringBuff, "Provider=SQLOLEDB;Server=(%s);Database=%s;uid=%s;pwd=%s;", hostIP, DBName, userName, userPassword);
+				String ^host;
+				if (hostIP->Equals("local")) {
+					host = "(local)";
+				} else {
+					host = hostIP + ",6895";
+				}
+				hostIP = host;
+				sprintf_s(connectStringBuff, "Provider=SQLOLEDB;Server=%s;Database=%s;uid=%s;pwd=%s;", host, DBName, userName, userPassword);
 				_bstr_t strConnect = connectStringBuff; //"Provider=SQLOLEDB;Server=(local);Database=M_WKQ;uid=sa;pwd=123456;";
 
 				m_pConnection->Open(strConnect, "", "", adModeUnknown);
